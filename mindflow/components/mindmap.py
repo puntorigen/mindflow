@@ -34,6 +34,10 @@ class MindMap(ctk.CTk):
         self.dragging = False
         self.last_side = "right"  # Track which side to add nodes to
         
+        # Text editing state
+        self.editing_node: Optional[Node] = None
+        self.text_editor: Optional[ctk.CTkEntry] = None
+        
         # Panning state
         self.panning = False
         self.pan_start_x = 0
@@ -188,10 +192,14 @@ class MindMap(ctk.CTk):
             self._move_node_and_subtree(child, dx, dy)
     
     def add_child_node(self, event=None):
-        """Add a child node to the currently active node."""
+        """Add a child node to the active node."""
+        # Don't create node if we're editing
+        if self.text_editor:
+            return "break"
+            
         if not self.active_node:
             return
-        
+            
         # Calculate position for new node
         new_x, new_y = self._calculate_node_position(self.active_node)
         
@@ -214,6 +222,10 @@ class MindMap(ctk.CTk):
     
     def add_sibling_node(self, event=None):
         """Add a sibling node at the same level as the active node."""
+        # Don't create node if we're editing
+        if self.text_editor:
+            return "break"
+            
         if not self.active_node or not self.active_node.parent:
             return
             
@@ -480,6 +492,74 @@ class MindMap(ctk.CTk):
                 return False
             current = current.parent
         return True
+    
+    def _start_editing(self, node: Node):
+        """Start editing a node's text."""
+        if self.text_editor:
+            self._finish_editing()
+        
+        self.editing_node = node
+        
+        # Get node text position and size
+        bbox = self.canvas.bbox(node.text_id)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        
+        # Create text editor
+        self.text_editor = ctk.CTkEntry(
+            self.canvas,  # Parent is canvas, not self
+            width=max(100, text_width + 20),
+            height=text_height + 10,
+            fg_color="#2D2D2D",
+            text_color="#FFFFFF",
+            border_width=0
+        )
+        
+        # Position editor
+        canvas_x = node.x
+        canvas_y = node.y
+        editor_window = self.canvas.create_window(
+            canvas_x, canvas_y,
+            window=self.text_editor,
+            tags="editor"
+        )
+        
+        # Set initial text and select all
+        self.text_editor.insert(0, node.text)
+        self.text_editor.select_range(0, 'end')
+        self.text_editor.focus()
+        
+        # Bind editor events
+        self.text_editor.bind("<Return>", lambda e: self._finish_editing(e) or "break")
+        self.text_editor.bind("<Escape>", lambda e: self._cancel_editing(e) or "break")
+        self.text_editor.bind("<FocusOut>", self._finish_editing)
+    
+    def _finish_editing(self, event=None):
+        """Finish editing and save changes."""
+        if not self.text_editor or not self.editing_node:
+            return
+            
+        # Update node text
+        new_text = self.text_editor.get().strip()
+        if new_text:
+            self.editing_node.update_text(new_text)
+        
+        # Clean up
+        self.canvas.delete("editor")
+        self.text_editor.destroy()
+        self.text_editor = None
+        self.editing_node = None
+    
+    def _cancel_editing(self, event=None):
+        """Cancel editing without saving changes."""
+        if not self.text_editor:
+            return
+            
+        # Clean up without saving
+        self.canvas.delete("editor")
+        self.text_editor.destroy()
+        self.text_editor = None
+        self.editing_node = None
     
     def _start_pan(self, event):
         """Start panning the canvas."""

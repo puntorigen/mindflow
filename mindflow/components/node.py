@@ -23,24 +23,15 @@ class Node:
         self.y = y
         self.text = text
         self._parent = None  # Initialize _parent before setting it through property
-        self.parent = parent  # Use property setter
         self.children: List['Node'] = []
         
         # Create unique id for this node
         self.id = str(uuid.uuid4())
         
-        # Calculate size based on text
-        font = tkfont.Font(family="Helvetica", size=12)
-        text_width = font.measure(text)
-        text_height = font.metrics("linespace")
-        padding = 10
-        
-        # Create rectangle
-        self.rect_id = canvas.create_rectangle(
-            x - text_width/2 - padding,
-            y - text_height/2 - padding,
-            x + text_width/2 + padding,
-            y + text_height/2 + padding,
+        # Create visual elements
+        self.rect_id = self.canvas.create_rectangle(
+            x - 50, y - 15,
+            x + 50, y + 15,
             fill="#2D2D2D",
             outline="#CCCCCC",
             width=1,
@@ -48,19 +39,41 @@ class Node:
         )
         
         # Create text
-        self.text_id = canvas.create_text(
+        self.text_id = self.canvas.create_text(
             x, y,
             text=text,
             fill="#FFFFFF",
-            font=("Helvetica", 12),
+            font=("Arial", 12),
             tags=("text", self.id)
         )
         
-        # Bind events to both rectangle and text
-        for item_id in [self.rect_id, self.text_id]:
-            canvas.tag_bind(item_id, "<Button-1>", self._on_click)
-            canvas.tag_bind(item_id, "<B1-Motion>", self._on_drag)
-            canvas.tag_bind(item_id, "<ButtonRelease-1>", self._on_release)
+        # Create invisible background for better click detection
+        bbox = self.canvas.bbox(self.text_id)
+        padding = 5
+        self.bg_id = self.canvas.create_rectangle(
+            bbox[0] - padding, bbox[1] - padding,
+            bbox[2] + padding, bbox[3] + padding,
+            fill="",
+            outline="",
+            width=0
+        )
+        
+        # Ensure proper z-order
+        self.canvas.tag_lower(self.bg_id, self.text_id)
+        
+        # Store reference to this node
+        self.canvas.setvar(f"node_{self.id}", self)
+        
+        # Bind events
+        for item_id in [self.rect_id, self.text_id, self.bg_id]:
+            self.canvas.tag_bind(item_id, "<Button-1>", self._on_click)
+            self.canvas.tag_bind(item_id, "<B1-Motion>", self._on_drag)
+            self.canvas.tag_bind(item_id, "<ButtonRelease-1>", self._on_release)
+            self.canvas.tag_bind(item_id, "<Double-Button-1>", self._on_double_click)
+        
+        # Set parent if provided
+        if parent:
+            self.parent = parent
     
     def _on_click(self, event):
         """Handle click event."""
@@ -83,6 +96,14 @@ class Node:
         mindmap._end_drag(event)
         return "break"
     
+    def _on_double_click(self, event):
+        """Handle double click event."""
+        # Get the mindmap instance
+        mindmap = self.canvas.master
+        # Call mindmap's edit method directly
+        mindmap._start_editing(self)
+        return "break"  # Prevent event from propagating
+        
     @property
     def parent(self) -> Optional['Node']:
         """Get the parent node."""
@@ -114,6 +135,7 @@ class Node:
         # Move visual elements
         self.canvas.move(self.rect_id, dx, dy)
         self.canvas.move(self.text_id, dx, dy)
+        self.canvas.move(self.bg_id, dx, dy)
         
         # Update connections
         if hasattr(self, 'connector'):
@@ -134,6 +156,18 @@ class Node:
             outline="#007ACC" if active else "#4A4A4A"
         )
     
+    def update_text(self, new_text: str):
+        """Update the node's text."""
+        self.text = new_text
+        self.canvas.itemconfig(self.text_id, text=new_text)
+        
+        # Update background rectangle size
+        bbox = self.canvas.bbox(self.text_id)
+        padding = 5
+        self.canvas.coords(self.bg_id,
+                         bbox[0] - padding, bbox[1] - padding,
+                         bbox[2] + padding, bbox[3] + padding)
+    
     def delete(self):
         """Remove the node and its visual elements."""
         # Delete children first
@@ -147,6 +181,7 @@ class Node:
         # Delete visual elements
         self.canvas.delete(self.rect_id)
         self.canvas.delete(self.text_id)
+        self.canvas.delete(self.bg_id)
         
         # Remove from parent
         if self.parent:
