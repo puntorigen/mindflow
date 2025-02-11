@@ -42,6 +42,11 @@ class MindMap(ctk.CTk):
         # Create central node
         self.create_central_node("Central Topic")
         
+        # Bind events
+        self.canvas.bind("<<NodeClicked>>", self._on_node_clicked)
+        self.canvas.bind("<<NodeDragged>>", self._on_node_dragged)
+        self.canvas.bind("<<NodeDropped>>", self._on_node_dropped)
+        
         # Bind canvas events for panning
         self.canvas.bind("<Button-1>", self._start_pan)
         self.canvas.bind("<B1-Motion>", self._pan)
@@ -66,32 +71,40 @@ class MindMap(ctk.CTk):
         self.nodes[node.id] = node
         self.set_active_node(node)
     
-    def set_active_node(self, node: Node):
+    def set_active_node(self, node: Optional[Node]):
         """Set the active node and update visual feedback."""
+        # Remove highlight from previous active node
         if self.active_node:
-            self.active_node.set_active(False)
+            self.canvas.itemconfig(self.active_node.rect_id, outline="#CCCCCC", width=1)
+        
+        # Update active node
         self.active_node = node
-        node.set_active(True)
+        
+        # Highlight new active node
+        if node:
+            self.canvas.itemconfig(node.rect_id, outline="#0078D4", width=2)
+            # Ensure the node and its text are above others
+            self.canvas.tag_raise(node.rect_id)
+            self.canvas.tag_raise(node.text_id)
     
     def _calculate_node_position(self, parent_node: Node) -> tuple[int, int]:
-        """Calculate the position for a new child node.
-        
-        Args:
-            parent_node: The parent node to calculate position relative to
-            
-        Returns:
-            Tuple of (x, y) coordinates for the new node
-        """
+        """Calculate the position for a new child node."""
         base_offset_x = 150  # Horizontal distance from parent
-        sibling_spacing = 50  # Vertical space between siblings
+        min_sibling_spacing = 60  # Minimum vertical space between siblings
         
         # If this is the root node's child, alternate sides
         if parent_node.parent is None:
-            if self.last_side == "right":
-                self.last_side = "left"
-                base_offset_x = -base_offset_x
-            else:
+            # First child always goes to the right
+            if not parent_node.children:
                 self.last_side = "right"
+                base_offset_x = abs(base_offset_x)
+            else:
+                if self.last_side == "right":
+                    self.last_side = "left"
+                    base_offset_x = -abs(base_offset_x)
+                else:
+                    self.last_side = "right"
+                    base_offset_x = abs(base_offset_x)
         else:
             # For other nodes, maintain the same side as the parent
             if parent_node.x < parent_node.parent.x:
@@ -102,51 +115,78 @@ class MindMap(ctk.CTk):
         # Calculate x position
         new_x = parent_node.x + base_offset_x
         
-        # Calculate y position
+        # Calculate initial y position
         if not parent_node.children:
             new_y = parent_node.y
         else:
-            # Position below the last child
+            # Calculate the total space needed for existing children
+            total_space = self._calculate_subtree_space(parent_node)
             last_child = parent_node.children[-1]
-            new_y = last_child.y + sibling_spacing
+            
+            # Position below the last child with minimum spacing
+            new_y = last_child.y + max(min_sibling_spacing, total_space / (len(parent_node.children) + 1))
         
         return new_x, new_y
     
-    def _reposition_node_and_subtree(self, node: Node, dx: int, dy: int):
-        """Recursively move a node and all its descendants.
-        
-        Args:
-            node: The node to move
-            dx: Change in x coordinate
-            dy: Change in y coordinate
-        """
-        node.move(dx, dy)
-        for child in node.children:
-            self._reposition_node_and_subtree(child, dx, dy)
-    
-    def _reposition_siblings(self, parent: Node):
-        """Reposition all children of a node to be evenly spaced.
-        
-        Args:
-            parent: The parent node whose children need repositioning
-        """
-        if not parent.children:
+    def _reposition_siblings(self, parent_node: Node):
+        """Reposition all children of a node to maintain proper spacing."""
+        if not parent_node or not parent_node.children:
             return
             
         # Sort children by vertical position
-        children = sorted(parent.children, key=lambda n: n.y)
+        children = sorted(parent_node.children, key=lambda n: n.y)
         
-        # Calculate desired positions
-        base_y = parent.y - ((len(children) - 1) * 50) / 2
+        # Calculate required vertical space for each node and its subtree
+        node_spaces = []
+        for child in children:
+            space = self._calculate_subtree_space(child)
+            node_spaces.append(space)
+        
+        # Start positioning from the parent's y position
+        current_y = parent_node.y - sum(node_spaces) / 2
+        
+        # Position each child and its subtree
         for i, child in enumerate(children):
-            target_x = parent.x + 150
-            target_y = base_y + (i * 50)
+            # Calculate vertical offset needed for this subtree
+            space_needed = node_spaces[i]
             
-            # Move the child and its subtree
-            dx = target_x - child.x
+            # Position the child at the center of its allocated space
+            target_y = current_y + space_needed / 2
+            
+            # Move the child and its entire subtree
             dy = target_y - child.y
-            self._reposition_node_and_subtree(child, dx, dy)
-
+            if abs(dy) > 1:  # Only move if the change is significant
+                self._move_node_and_subtree(child, 0, dy)
+            
+            # Update current_y for next child
+            current_y += space_needed
+    
+    def _calculate_subtree_space(self, node: Node) -> float:
+        """Calculate the vertical space needed for a node and its subtree."""
+        MIN_NODE_HEIGHT = 40  # Minimum vertical space per node
+        SIBLING_PADDING = 20  # Minimum padding between sibling nodes
+        
+        if not node.children:
+            return MIN_NODE_HEIGHT + SIBLING_PADDING
+        
+        # Calculate space needed for children
+        child_space = sum(self._calculate_subtree_space(child) for child in node.children)
+        
+        # Return maximum of minimum node height or children's total space
+        return max(MIN_NODE_HEIGHT + SIBLING_PADDING, child_space)
+    
+    def _move_node_and_subtree(self, node: Node, dx: int, dy: int):
+        """Move a node and its entire subtree by the specified delta."""
+        # Move the node
+        node.x += dx
+        node.y += dy
+        self.canvas.move(node.rect_id, dx, dy)
+        self.canvas.move(node.text_id, dx, dy)
+        
+        # Move all children recursively
+        for child in node.children:
+            self._move_node_and_subtree(child, dx, dy)
+    
     def add_child_node(self, event=None):
         """Add a child node to the currently active node."""
         if not self.active_node:
@@ -255,6 +295,19 @@ class MindMap(ctk.CTk):
             siblings[current_index], siblings[current_index + 1] = siblings[current_index + 1], siblings[current_index]
             self._reposition_siblings(self.active_node.parent)
     
+    def _on_node_clicked(self, event):
+        """Handle node click event."""
+        node = event.widget.getvar("data")
+        self._start_drag(node, event)
+        
+    def _on_node_dragged(self, event):
+        """Handle node drag event."""
+        self._drag(event)
+        
+    def _on_node_dropped(self, event):
+        """Handle node drop event."""
+        self._end_drag(event)
+    
     def _start_drag(self, node: Node, event):
         """Start dragging a node."""
         if node.parent is None:  # Don't allow dragging the root node
@@ -289,7 +342,7 @@ class MindMap(ctk.CTk):
         dy = canvas_y - self.drag_start_y
         
         # Move the node and its children
-        self._move_node_and_children(self.dragged_node, dx, dy)
+        self._move_node_and_subtree(self.dragged_node, dx, dy)
         
         # Update the start position for the next movement
         self.drag_start_x = canvas_x
@@ -365,25 +418,20 @@ class MindMap(ctk.CTk):
         for node in self.nodes.values():
             if not self._can_be_parent(node, self.dragged_node):
                 continue
+                
+            # Calculate distance to node center
+            dx = x - node.x
+            dy = y - node.y
+            distance = (dx * dx + dy * dy) ** 0.5
             
-            # Get node bounds
-            bbox = self.canvas.bbox(node.rect_id)
-            if not bbox:
-                continue
-                
-            # Check if cursor is inside or very close to the node
-            if (bbox[0] - 10 <= x <= bbox[2] + 10 and
-                bbox[1] - 10 <= y <= bbox[3] + 10):
-                # Calculate distance to node center
-                center_x = (bbox[0] + bbox[2]) / 2
-                center_y = (bbox[1] + bbox[3]) / 2
-                distance = ((x - center_x) ** 2 + (y - center_y) ** 2) ** 0.5
-                
-                if distance < min_distance:
-                    min_distance = distance
-                    closest_node = node
+            if distance < min_distance:
+                min_distance = distance
+                closest_node = node
         
-        return closest_node
+        # Only return the node if it's within a reasonable distance
+        if min_distance < 50:  # Adjust this threshold as needed
+            return closest_node
+        return None
     
     def _reset_z_order(self):
         """Reset the z-order of all elements."""
@@ -432,20 +480,6 @@ class MindMap(ctk.CTk):
                 return False
             current = current.parent
         return True
-    
-    def _move_node_and_children(self, node: Node, dx: int, dy: int):
-        """Move a node and all its descendants by a delta."""
-        # Move the node's visual elements
-        self.canvas.move(node.rect_id, dx, dy)
-        self.canvas.move(node.text_id, dx, dy)
-        
-        # Update node's position
-        node.x += dx
-        node.y += dy
-        
-        # Move all children recursively
-        for child in node.children:
-            self._move_node_and_children(child, dx, dy)
     
     def _start_pan(self, event):
         """Start panning the canvas."""
