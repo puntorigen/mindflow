@@ -250,62 +250,84 @@ class MindMap(ctk.CTk):
         self._reset_z_order()
     
     def navigate_left(self, event=None):
-        """Move to the parent node of the active node."""
-        if self.active_node and self.active_node.parent:
-            self.set_active_node(self.active_node.parent)
+        """Move to the parent node if on right side, or first child if on left side."""
+        if not self.active_node:
+            return
+            
+        # If node is on the right side of its parent (or is root's right child), go to parent
+        if not self.active_node.parent or self.active_node.x > self.active_node.parent.x:
+            if self.active_node.parent:
+                self.set_active_node(self.active_node.parent)
+        # If node is on the left side, try to go to first child
+        else:
+            children = sorted(self.active_node.children, key=lambda n: n.y)
+            if children:
+                self.set_active_node(children[0])
     
     def navigate_right(self, event=None):
-        """Move to the first child node of the active node."""
-        if self.active_node and self.active_node.children:
-            self.set_active_node(self.active_node.children[0])
+        """Move to the parent node if on left side, or first child if on right side."""
+        if not self.active_node:
+            return
+            
+        # If node is on the left side of its parent (or is root's left child), go to parent
+        if not self.active_node.parent or self.active_node.x < self.active_node.parent.x:
+            if self.active_node.parent:
+                self.set_active_node(self.active_node.parent)
+        # If node is on the right side, try to go to first child
+        else:
+            children = sorted(self.active_node.children, key=lambda n: n.y)
+            if children:
+                self.set_active_node(children[0])
     
     def navigate_up(self, event=None):
-        """Move to the previous sibling of the active node."""
+        """Move to the sibling node above the current node."""
         if not self.active_node or not self.active_node.parent:
             return
             
-        siblings = self.active_node.parent.children
+        siblings = sorted(self.active_node.parent.children, key=lambda n: n.y)
         current_index = siblings.index(self.active_node)
         
         if current_index > 0:
             self.set_active_node(siblings[current_index - 1])
     
     def navigate_down(self, event=None):
-        """Move to the next sibling of the active node."""
+        """Move to the sibling node below the current node."""
         if not self.active_node or not self.active_node.parent:
             return
             
-        siblings = self.active_node.parent.children
+        siblings = sorted(self.active_node.parent.children, key=lambda n: n.y)
         current_index = siblings.index(self.active_node)
         
         if current_index < len(siblings) - 1:
             self.set_active_node(siblings[current_index + 1])
     
     def move_node_up(self, event=None):
-        """Move the active node up in its sibling order."""
+        """Move the current node up in its sibling order."""
         if not self.active_node or not self.active_node.parent:
             return
             
-        siblings = self.active_node.parent.children
+        siblings = sorted(self.active_node.parent.children, key=lambda n: n.y)
         current_index = siblings.index(self.active_node)
         
         if current_index > 0:
-            # Swap positions in the parent's children list
+            # Swap positions in the list
             siblings[current_index], siblings[current_index - 1] = siblings[current_index - 1], siblings[current_index]
             self._reposition_siblings(self.active_node.parent)
+            self._update_connector_lines()
     
     def move_node_down(self, event=None):
-        """Move the active node down in its sibling order."""
+        """Move the current node down in its sibling order."""
         if not self.active_node or not self.active_node.parent:
             return
             
-        siblings = self.active_node.parent.children
+        siblings = sorted(self.active_node.parent.children, key=lambda n: n.y)
         current_index = siblings.index(self.active_node)
         
         if current_index < len(siblings) - 1:
-            # Swap positions in the parent's children list
+            # Swap positions in the list
             siblings[current_index], siblings[current_index + 1] = siblings[current_index + 1], siblings[current_index]
             self._reposition_siblings(self.active_node.parent)
+            self._update_connector_lines()
     
     def _on_node_clicked(self, event):
         """Handle node click event."""
