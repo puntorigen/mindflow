@@ -249,6 +249,47 @@ class MindMap(ctk.CTk):
         self._update_connector_lines()
         self._reset_z_order()
     
+    def add_child_node_at(self, parent: Node, text: str, side: str = "right") -> Node:
+        """Add a child node to the specified parent on the given side."""
+        # Calculate base position
+        if side == "left":
+            new_x = parent.x - 200  # Move left from parent
+        else:
+            new_x = parent.x + 200  # Move right from parent
+            
+        # Calculate vertical position based on existing children
+        siblings = [n for n in self.nodes.values() 
+                   if n.parent == parent and 
+                   ((side == "left" and n.x < parent.x) or 
+                    (side == "right" and n.x > parent.x))]
+        
+        if siblings:
+            # Place below the last sibling
+            last_sibling = max(siblings, key=lambda n: n.y)
+            new_y = last_sibling.y + 80
+        else:
+            # First child on this side
+            new_y = parent.y
+        
+        # Create the new node
+        new_node = Node(
+            self.canvas,
+            new_x,
+            new_y,
+            text,
+            parent
+        )
+        
+        # Add to nodes dictionary
+        self.nodes[new_node.id] = new_node
+        
+        # Update layout
+        self._reposition_siblings(parent)
+        self._update_connector_lines()
+        self._reset_z_order()
+        
+        return new_node
+    
     def _find_closest_node_in_direction(self, node: Node, direction: str) -> Optional[Node]:
         """Find the closest node in the specified direction."""
         if not node:
