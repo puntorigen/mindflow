@@ -249,57 +249,114 @@ class MindMap(ctk.CTk):
         self._update_connector_lines()
         self._reset_z_order()
     
+    def _find_closest_node_in_direction(self, node: Node, direction: str) -> Optional[Node]:
+        """Find the closest node in the specified direction."""
+        if not node:
+            return None
+            
+        # First check for direct parent-child relationships
+        if direction in ["left", "right"]:
+            # Going left to parent
+            if direction == "left" and node.parent and node.x > node.parent.x:
+                return node.parent
+            # Going right to parent
+            elif direction == "right" and node.parent and node.x < node.parent.x:
+                return node.parent
+            # Going to children
+            elif ((direction == "right" and node.x > (node.parent.x if node.parent else float('-inf'))) or
+                  (direction == "left" and node.x < (node.parent.x if node.parent else float('inf')))):
+                if node.children:
+                    # Try to find a child that's horizontally aligned first
+                    alignment_threshold = 20  # Smaller threshold for horizontal alignment
+                    aligned_children = [child for child in node.children 
+                                     if abs(child.y - node.y) < alignment_threshold]
+                    if aligned_children:
+                        # If multiple aligned children, take the closest one
+                        if direction == "right":
+                            return min(aligned_children, key=lambda c: c.x - node.x)
+                        else:
+                            return min(aligned_children, key=lambda c: node.x - c.x)
+                    # If no aligned children, fall back to the closest one vertically
+                    return min(node.children, key=lambda c: abs(c.y - node.y))
+        
+        candidates = []
+        vertical_threshold = 50  # Threshold for up/down movement
+        
+        # Get all nodes except the current one
+        other_nodes = [n for n in self.nodes.values() if n != node]
+        
+        # First pass: find nodes in the specified direction
+        direction_nodes = []
+        for other in other_nodes:
+            if direction == "up" and other.y < node.y:
+                direction_nodes.append(other)
+            elif direction == "down" and other.y > node.y:
+                direction_nodes.append(other)
+            elif direction == "left" and other.x < node.x:
+                direction_nodes.append(other)
+            elif direction == "right" and other.x > node.x:
+                direction_nodes.append(other)
+        
+        # If only one node in horizontal direction, be more lenient
+        horizontal_threshold = 200 if direction in ["left", "right"] and len(direction_nodes) == 1 else vertical_threshold
+        
+        # Second pass: apply thresholds and calculate distances
+        for other in direction_nodes:
+            if direction == "up":
+                if abs(other.x - node.x) < vertical_threshold:
+                    candidates.append((other, abs(other.x - node.x), node.y - other.y))
+            elif direction == "down":
+                if abs(other.x - node.x) < vertical_threshold:
+                    candidates.append((other, abs(other.x - node.x), other.y - node.y))
+            elif direction == "left":
+                if abs(other.y - node.y) < horizontal_threshold:
+                    candidates.append((other, node.x - other.x, abs(other.y - node.y)))
+            elif direction == "right":
+                if abs(other.y - node.y) < horizontal_threshold:
+                    candidates.append((other, other.x - node.x, abs(other.y - node.y)))
+        
+        if not candidates:
+            return None
+            
+        # Sort by alignment difference first, then by distance
+        candidates.sort(key=lambda x: (x[2], x[1]))
+        return candidates[0][0]
+    
     def navigate_left(self, event=None):
-        """Move to the parent node if on right side, or first child if on left side."""
+        """Move to the closest node to the left."""
         if not self.active_node:
             return
-            
-        # If node is on the right side of its parent (or is root's right child), go to parent
-        if not self.active_node.parent or self.active_node.x > self.active_node.parent.x:
-            if self.active_node.parent:
-                self.set_active_node(self.active_node.parent)
-        # If node is on the left side, try to go to first child
-        else:
-            children = sorted(self.active_node.children, key=lambda n: n.y)
-            if children:
-                self.set_active_node(children[0])
+        
+        next_node = self._find_closest_node_in_direction(self.active_node, "left")
+        if next_node:
+            self.set_active_node(next_node)
     
     def navigate_right(self, event=None):
-        """Move to the parent node if on left side, or first child if on right side."""
+        """Move to the closest node to the right."""
         if not self.active_node:
             return
-            
-        # If node is on the left side of its parent (or is root's left child), go to parent
-        if not self.active_node.parent or self.active_node.x < self.active_node.parent.x:
-            if self.active_node.parent:
-                self.set_active_node(self.active_node.parent)
-        # If node is on the right side, try to go to first child
-        else:
-            children = sorted(self.active_node.children, key=lambda n: n.y)
-            if children:
-                self.set_active_node(children[0])
+        
+        next_node = self._find_closest_node_in_direction(self.active_node, "right")
+        if next_node:
+            self.set_active_node(next_node)
     
     def navigate_up(self, event=None):
-        """Move to the sibling node above the current node."""
-        if not self.active_node or not self.active_node.parent:
+        """Move to the closest node above."""
+        if not self.active_node:
             return
-            
-        siblings = sorted(self.active_node.parent.children, key=lambda n: n.y)
-        current_index = siblings.index(self.active_node)
         
-        if current_index > 0:
-            self.set_active_node(siblings[current_index - 1])
+        next_node = self._find_closest_node_in_direction(self.active_node, "up")
+        if next_node:
+            self.set_active_node(next_node)
     
     def navigate_down(self, event=None):
-        """Move to the sibling node below the current node."""
-        if not self.active_node or not self.active_node.parent:
+        """Move to the closest node below."""
+        if not self.active_node:
             return
-            
-        siblings = sorted(self.active_node.parent.children, key=lambda n: n.y)
-        current_index = siblings.index(self.active_node)
         
-        if current_index < len(siblings) - 1:
-            self.set_active_node(siblings[current_index + 1])
+        next_node = self._find_closest_node_in_direction(self.active_node, "down")
+        if next_node:
+            self.set_active_node(next_node)
     
     def move_node_up(self, event=None):
         """Move the current node up in its sibling order."""
@@ -399,7 +456,28 @@ class MindMap(ctk.CTk):
         
         if new_parent and new_parent != self.dragged_node.parent:
             old_parent = self.dragged_node.parent
-            self.dragged_node.parent = new_parent  # This will handle children list updates
+            
+            # Remove from old parent's children
+            if old_parent:
+                old_parent.children.remove(self.dragged_node)
+            
+            # Add to new parent's children
+            new_parent.children.append(self.dragged_node)
+            self.dragged_node.parent = new_parent
+            
+            # Determine if we need to flip direction
+            old_direction = "right" if self.dragged_node.x > old_parent.x else "left"
+            
+            # For new direction, if it's root's child, use default direction
+            # Otherwise, check relative position to its parent
+            if new_parent.parent is None:
+                new_direction = "right"
+            else:
+                new_direction = "right" if new_parent.x > new_parent.parent.x else "left"
+            
+            # If direction changed, flip the node and its subtree
+            if old_direction != new_direction:
+                self._flip_node_subtree(self.dragged_node)
             
             # Reposition nodes
             self._reposition_siblings(old_parent)
@@ -423,7 +501,7 @@ class MindMap(ctk.CTk):
         
         # Reset z-order
         self._reset_z_order()
-    
+
     def _update_connector_lines(self):
         """Update connector lines."""
         # Remove all connector lines
@@ -514,6 +592,31 @@ class MindMap(ctk.CTk):
                 return False
             current = current.parent
         return True
+    
+    def _flip_node_subtree(self, node: Node):
+        """Flip a node and its entire subtree to the opposite direction."""
+        if not node.parent:
+            return
+            
+        def flip_node_position(node, parent_x):
+            # Calculate and flip the node's position
+            dx = node.x - parent_x
+            node.x = parent_x - dx
+            
+            # Update visual elements
+            bbox = self.canvas.bbox(node.rect_id)
+            width = bbox[2] - bbox[0]
+            self.canvas.coords(node.rect_id,
+                             node.x - width/2, bbox[1],
+                             node.x + width/2, bbox[3])
+            self.canvas.coords(node.text_id, node.x, node.y)
+            
+            # Recursively flip children
+            for child in node.children:
+                flip_node_position(child, node.x)
+        
+        # Start the recursive flip from the top node
+        flip_node_position(node, node.parent.x)
     
     def _start_editing(self, node: Node):
         """Start editing a node's text."""
