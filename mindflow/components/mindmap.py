@@ -295,6 +295,48 @@ class MindMap(ctk.CTk):
         if not node:
             return None
             
+        # Determine if we're in a left-side subtree
+        def is_in_left_subtree(node):
+            if not node.parent:
+                return False
+            if not node.parent.parent:  # Parent is central node
+                return node.x < node.parent.x
+            return is_in_left_subtree(node.parent)
+        
+        # If we're in a left subtree, invert left/right directions
+        original_direction = direction
+        if is_in_left_subtree(node) and direction in ["left", "right"]:
+            direction = "left" if direction == "right" else "right"
+            
+        # Special handling for central node transitions
+        if not node.parent:  # If this is the central node
+            # Get all immediate children
+            left_children = [n for n in self.nodes.values() 
+                           if n.parent == node and n.x < node.x]
+            right_children = [n for n in self.nodes.values() 
+                            if n.parent == node and n.x > node.x]
+            
+            if original_direction == "left" and left_children:
+                # Find the most horizontally aligned child on the left
+                return min(left_children, key=lambda n: abs(n.y - node.y))
+            elif original_direction == "right" and right_children:
+                # Find the most horizontally aligned child on the right
+                return min(right_children, key=lambda n: abs(n.y - node.y))
+        
+        # Special handling for crossing through center
+        if node.parent and not node.parent.parent:  # If parent is central node
+            if (original_direction == "right" and node.x < node.parent.x) or \
+               (original_direction == "left" and node.x > node.parent.x):
+                # Get siblings from the other side
+                other_side_siblings = [n for n in self.nodes.values() 
+                                     if n.parent == node.parent and 
+                                     ((original_direction == "right" and n.x > node.parent.x) or
+                                      (original_direction == "left" and n.x < node.parent.x))]
+                if other_side_siblings:
+                    # Find the most horizontally aligned sibling
+                    return min(other_side_siblings, key=lambda n: abs(n.y - node.y))
+                return node.parent
+        
         # First check for direct parent-child relationships
         if direction in ["left", "right"]:
             # Going left to parent
