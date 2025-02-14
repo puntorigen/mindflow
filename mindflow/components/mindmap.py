@@ -43,6 +43,9 @@ class MindMap(ctk.CTk):
         self.pan_start_x = 0
         self.pan_start_y = 0
         
+        # Event system
+        self._event_handlers = {}  # Store event handlers
+        
         # Create central node
         self.create_central_node("Central Topic")
         
@@ -66,6 +69,29 @@ class MindMap(ctk.CTk):
         self.bind("<Control-Up>", self.move_node_up)
         self.bind("<Control-Down>", self.move_node_down)
         self.bind("<space>", self.toggle_active_node)
+        self.bind("<n>", self.create_node_at_active)  # New binding
+    
+    def bind_event(self, event_name: str, handler):
+        """Bind a handler to a custom event.
+        
+        Args:
+            event_name: Name of the event to bind to
+            handler: Function to call when event occurs
+        """
+        if event_name not in self._event_handlers:
+            self._event_handlers[event_name] = []
+        self._event_handlers[event_name].append(handler)
+    
+    def emit_event(self, event_name: str, **kwargs):
+        """Emit a custom event.
+        
+        Args:
+            event_name: Name of the event to emit
+            **kwargs: Additional data to pass to handlers
+        """
+        if event_name in self._event_handlers:
+            for handler in self._event_handlers[event_name]:
+                handler(event_name=event_name, **kwargs)
     
     def create_central_node(self, text: str):
         """Create the central node of the mind map."""
@@ -776,6 +802,8 @@ class MindMap(ctk.CTk):
         self.text_editor.destroy()
         self.text_editor = None
         self.editing_node = None
+        
+        self.emit_event("node_text_changed", node=self.editing_node, text=new_text)
     
     def _cancel_editing(self, event=None):
         """Cancel editing without saving changes."""
@@ -832,6 +860,7 @@ class MindMap(ctk.CTk):
         if self.active_node.toggle_collapse():
             self._update_node_visibility()
             self._update_connector_lines()
+            self.emit_event("node_toggled", node=self.active_node)
     
     def _update_node_visibility(self):
         """Update visibility of nodes based on collapse state."""
@@ -856,3 +885,85 @@ class MindMap(ctk.CTk):
                 node._update_collapse_indicator()
             else:
                 self.canvas.itemconfig(node.collapse_indicator, state="hidden")
+
+    def create_child_node(self, parent_node: Node, text: str = "New Node") -> Node:
+        """Create a new child node with proper connections.
+        
+        Args:
+            parent_node: Parent node to create child under
+            text: Text for the new node
+            
+        Returns:
+            The newly created node
+        """
+        # Calculate position for new node
+        x = parent_node.x + 150  # Horizontal distance from parent
+        y = parent_node.y
+        
+        # Create the node
+        new_node = Node(self.canvas, x, y, text, parent=parent_node)
+        self.nodes[new_node.id] = new_node
+        
+        # Add to parent's children
+        parent_node.children.append(new_node)
+        
+        # Create connector line
+        line_id = self.canvas.create_line(
+            parent_node.x, parent_node.y,
+            new_node.x, new_node.y,
+            fill="#CCCCCC",
+            width=2
+        )
+        new_node.connector = line_id
+        
+        # Update parent's collapse indicator
+        parent_node._update_collapse_indicator()
+        
+        # Layout the nodes
+        self._layout_nodes()
+        
+        # Emit creation event
+        self.emit_event("node_created", node=new_node, parent=parent_node)
+        
+        return new_node
+
+    def add_child_node_at(self, parent: Node, text: str = "New Node", side: str = None) -> Node:
+        """Add a child node at the specified parent node.
+        
+        Args:
+            parent: Parent node
+            text: Text for the new node
+            side: Side to add node on ('left' or 'right', None for automatic)
+            
+        Returns:
+            The newly created node
+        """
+        # Create the node using create_child_node
+        new_node = self.create_child_node(parent, text)
+        
+        # Update layout
+        self._layout_nodes()
+        
+        return new_node
+
+    def _layout_nodes(self):
+        """Layout all nodes."""
+        for node in self.nodes.values():
+            if node.parent:
+                self._reposition_siblings(node.parent)
+                self._update_connector_lines()
+                self._reset_z_order()
+
+    def create_node_at_active(self, event=None):
+        """Create a new node at the active node."""
+        if not self.active_node:
+            return
+        
+        # Create new node using create_child_node
+        new_node = self.create_child_node(self.active_node)
+        
+        # Set it as active
+        self.set_active_node(new_node)
+        
+        # Start editing the new node
+        self._start_editing(new_node)
