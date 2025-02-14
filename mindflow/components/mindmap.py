@@ -291,79 +291,13 @@ class MindMap(ctk.CTk):
         return new_node
     
     def _find_closest_node_in_direction(self, node: Node, direction: str) -> Optional[Node]:
-        """Find the closest node in the specified direction."""
+        """Find the closest node in the specified direction based on visual position."""
         if not node:
             return None
             
-        # Determine if we're in a left-side subtree
-        def is_in_left_subtree(node):
-            if not node.parent:
-                return False
-            if not node.parent.parent:  # Parent is central node
-                return node.x < node.parent.x
-            return is_in_left_subtree(node.parent)
-        
-        # If we're in a left subtree, invert left/right directions
-        original_direction = direction
-        if is_in_left_subtree(node) and direction in ["left", "right"]:
-            direction = "left" if direction == "right" else "right"
-            
-        # Special handling for central node transitions
-        if not node.parent:  # If this is the central node
-            # Get all immediate children
-            left_children = [n for n in self.nodes.values() 
-                           if n.parent == node and n.x < node.x]
-            right_children = [n for n in self.nodes.values() 
-                            if n.parent == node and n.x > node.x]
-            
-            if original_direction == "left" and left_children:
-                # Find the most horizontally aligned child on the left
-                return min(left_children, key=lambda n: abs(n.y - node.y))
-            elif original_direction == "right" and right_children:
-                # Find the most horizontally aligned child on the right
-                return min(right_children, key=lambda n: abs(n.y - node.y))
-        
-        # Special handling for crossing through center
-        if node.parent and not node.parent.parent:  # If parent is central node
-            if (original_direction == "right" and node.x < node.parent.x) or \
-               (original_direction == "left" and node.x > node.parent.x):
-                # Get siblings from the other side
-                other_side_siblings = [n for n in self.nodes.values() 
-                                     if n.parent == node.parent and 
-                                     ((original_direction == "right" and n.x > node.parent.x) or
-                                      (original_direction == "left" and n.x < node.parent.x))]
-                if other_side_siblings:
-                    # Find the most horizontally aligned sibling
-                    return min(other_side_siblings, key=lambda n: abs(n.y - node.y))
-                return node.parent
-        
-        # First check for direct parent-child relationships
-        if direction in ["left", "right"]:
-            # Going left to parent
-            if direction == "left" and node.parent and node.x > node.parent.x:
-                return node.parent
-            # Going right to parent
-            elif direction == "right" and node.parent and node.x < node.parent.x:
-                return node.parent
-            # Going to children
-            elif ((direction == "right" and node.x > (node.parent.x if node.parent else float('-inf'))) or
-                  (direction == "left" and node.x < (node.parent.x if node.parent else float('inf')))):
-                if node.children:
-                    # Try to find a child that's horizontally aligned first
-                    alignment_threshold = 20  # Smaller threshold for horizontal alignment
-                    aligned_children = [child for child in node.children 
-                                     if abs(child.y - node.y) < alignment_threshold]
-                    if aligned_children:
-                        # If multiple aligned children, take the closest one
-                        if direction == "right":
-                            return min(aligned_children, key=lambda c: c.x - node.x)
-                        else:
-                            return min(aligned_children, key=lambda c: node.x - c.x)
-                    # If no aligned children, fall back to the closest one vertically
-                    return min(node.children, key=lambda c: abs(c.y - node.y))
-        
         candidates = []
         vertical_threshold = 50  # Threshold for up/down movement
+        horizontal_threshold = 50  # Base threshold for left/right movement
         
         # Get all nodes except the current one
         other_nodes = [n for n in self.nodes.values() if n != node]
@@ -380,29 +314,46 @@ class MindMap(ctk.CTk):
             elif direction == "right" and other.x > node.x:
                 direction_nodes.append(other)
         
-        # If only one node in horizontal direction, be more lenient
-        horizontal_threshold = 200 if direction in ["left", "right"] and len(direction_nodes) == 1 else vertical_threshold
+        # If only one node in the direction, be more lenient with alignment
+        if len(direction_nodes) == 1:
+            if direction in ["left", "right"]:
+                horizontal_threshold = 200
+            else:
+                vertical_threshold = 100
         
         # Second pass: apply thresholds and calculate distances
         for other in direction_nodes:
             if direction == "up":
                 if abs(other.x - node.x) < vertical_threshold:
-                    candidates.append((other, abs(other.x - node.x), node.y - other.y))
+                    # Prioritize nodes that are more directly above
+                    alignment_score = abs(other.x - node.x)
+                    vertical_distance = node.y - other.y
+                    candidates.append((other, alignment_score, vertical_distance))
             elif direction == "down":
                 if abs(other.x - node.x) < vertical_threshold:
-                    candidates.append((other, abs(other.x - node.x), other.y - node.y))
+                    # Prioritize nodes that are more directly below
+                    alignment_score = abs(other.x - node.x)
+                    vertical_distance = other.y - node.y
+                    candidates.append((other, alignment_score, vertical_distance))
             elif direction == "left":
                 if abs(other.y - node.y) < horizontal_threshold:
-                    candidates.append((other, node.x - other.x, abs(other.y - node.y)))
+                    # Prioritize nodes that are more directly to the left
+                    alignment_score = abs(other.y - node.y)
+                    horizontal_distance = node.x - other.x
+                    candidates.append((other, alignment_score, horizontal_distance))
             elif direction == "right":
                 if abs(other.y - node.y) < horizontal_threshold:
-                    candidates.append((other, other.x - node.x, abs(other.y - node.y)))
+                    # Prioritize nodes that are more directly to the right
+                    alignment_score = abs(other.y - node.y)
+                    horizontal_distance = other.x - node.x
+                    candidates.append((other, alignment_score, horizontal_distance))
         
         if not candidates:
             return None
-            
-        # Sort by alignment difference first, then by distance
-        candidates.sort(key=lambda x: (x[2], x[1]))
+        
+        # Sort by alignment first (how well aligned in the perpendicular axis),
+        # then by distance in the movement direction
+        candidates.sort(key=lambda x: (x[1], x[2]))
         return candidates[0][0]
     
     def navigate_left(self, event=None):
