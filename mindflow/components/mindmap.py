@@ -296,64 +296,89 @@ class MindMap(ctk.CTk):
             return None
             
         candidates = []
-        vertical_threshold = 50  # Threshold for up/down movement
-        horizontal_threshold = 50  # Base threshold for left/right movement
+        base_vertical_threshold = 50
+        base_horizontal_threshold = 50
         
         # Get all nodes except the current one
         other_nodes = [n for n in self.nodes.values() if n != node]
         
-        # First pass: find nodes in the specified direction
+        # First pass: find nodes in the specified direction and calculate their distances
         direction_nodes = []
         for other in other_nodes:
+            dx = abs(other.x - node.x)
+            dy = abs(other.y - node.y)
+            direct_distance = (dx * dx + dy * dy) ** 0.5  # Euclidean distance
+            
             if direction == "up" and other.y < node.y:
-                direction_nodes.append(other)
+                direction_nodes.append((other, dx, dy, direct_distance))
             elif direction == "down" and other.y > node.y:
-                direction_nodes.append(other)
+                direction_nodes.append((other, dx, dy, direct_distance))
             elif direction == "left" and other.x < node.x:
-                direction_nodes.append(other)
+                direction_nodes.append((other, dx, dy, direct_distance))
             elif direction == "right" and other.x > node.x:
-                direction_nodes.append(other)
+                direction_nodes.append((other, dx, dy, direct_distance))
         
-        # If only one node in the direction, be more lenient with alignment
-        if len(direction_nodes) == 1:
-            if direction in ["left", "right"]:
-                horizontal_threshold = 200
-            else:
-                vertical_threshold = 100
+        if not direction_nodes:
+            return None
+            
+        # Sort by direct distance to find closest nodes
+        direction_nodes.sort(key=lambda x: x[3])
+        closest_distance = direction_nodes[0][3]
         
-        # Second pass: apply thresholds and calculate distances
-        for other in direction_nodes:
-            if direction == "up":
-                if abs(other.x - node.x) < vertical_threshold:
-                    # Prioritize nodes that are more directly above
-                    alignment_score = abs(other.x - node.x)
-                    vertical_distance = node.y - other.y
-                    candidates.append((other, alignment_score, vertical_distance))
-            elif direction == "down":
-                if abs(other.x - node.x) < vertical_threshold:
-                    # Prioritize nodes that are more directly below
-                    alignment_score = abs(other.x - node.x)
-                    vertical_distance = other.y - node.y
-                    candidates.append((other, alignment_score, vertical_distance))
-            elif direction == "left":
-                if abs(other.y - node.y) < horizontal_threshold:
-                    # Prioritize nodes that are more directly to the left
-                    alignment_score = abs(other.y - node.y)
-                    horizontal_distance = node.x - other.x
-                    candidates.append((other, alignment_score, horizontal_distance))
-            elif direction == "right":
-                if abs(other.y - node.y) < horizontal_threshold:
-                    # Prioritize nodes that are more directly to the right
-                    alignment_score = abs(other.y - node.y)
-                    horizontal_distance = other.x - node.x
-                    candidates.append((other, alignment_score, horizontal_distance))
+        # Dynamically adjust thresholds based on closest node and context
+        if direction in ["left", "right"]:
+            # For horizontal movement, be more lenient with vertical alignment
+            # especially for parent-child relationships
+            horizontal_threshold = max(
+                base_horizontal_threshold,
+                # Scale threshold with distance to closest node
+                min(closest_distance * 1.5, 400)
+            )
+            
+            # Check if any nodes are direct parent/children
+            has_parent_child = any(
+                other[0].parent == node or node.parent == other[0]
+                for other in direction_nodes[:3]  # Check among closest nodes
+            )
+            
+            if has_parent_child:
+                horizontal_threshold = max(horizontal_threshold, 500)
+        else:
+            horizontal_threshold = base_horizontal_threshold
+            
+        vertical_threshold = base_vertical_threshold
+        if len(direction_nodes) <= 2:
+            vertical_threshold = 150
+            horizontal_threshold = max(horizontal_threshold, 300)
+        
+        # Second pass: score candidates with adjusted thresholds
+        for other, dx, dy, direct_distance in direction_nodes:
+            if direction in ["up", "down"]:
+                if dx < vertical_threshold:
+                    # Score based on horizontal alignment and vertical distance
+                    alignment_score = dx / vertical_threshold
+                    distance_score = direct_distance / 1000
+                    score = alignment_score * 0.6 + distance_score * 0.4
+                    candidates.append((other, score, direct_distance))
+            else:  # left/right
+                if dy < horizontal_threshold:
+                    # For horizontal movement, consider parent-child relationships
+                    is_parent_child = (other.parent == node or node.parent == other)
+                    # Normalize vertical offset relative to horizontal distance
+                    alignment_score = dy / (dx + 1)  # Add 1 to avoid division by zero
+                    distance_score = direct_distance / 1000
+                    
+                    # Combined score with different weights
+                    score = alignment_score * 0.5 + distance_score * 0.5
+                    if is_parent_child:
+                        score *= 0.7  # Significant bonus for parent-child relationships
+                    candidates.append((other, score, direct_distance))
         
         if not candidates:
             return None
         
-        # Sort by alignment first (how well aligned in the perpendicular axis),
-        # then by distance in the movement direction
-        candidates.sort(key=lambda x: (x[1], x[2]))
+        # Sort by score (lower is better)
+        candidates.sort(key=lambda x: x[1])
         return candidates[0][0]
     
     def navigate_left(self, event=None):
