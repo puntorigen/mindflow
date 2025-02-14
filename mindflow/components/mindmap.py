@@ -6,9 +6,9 @@ from .node import Node
 class MindMap(ctk.CTk):
     """Main mind map application window."""
     
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
         """Initialize the mind map window."""
-        super().__init__()
+        super().__init__(*args, **kwargs)
         
         self.title("MindMap")
         self.geometry("800x600")
@@ -65,6 +65,7 @@ class MindMap(ctk.CTk):
         self.bind("<Down>", self.navigate_down)
         self.bind("<Control-Up>", self.move_node_up)
         self.bind("<Control-Down>", self.move_node_down)
+        self.bind("<space>", self.toggle_active_node)
     
     def create_central_node(self, text: str):
         """Create the central node of the mind map."""
@@ -180,12 +181,20 @@ class MindMap(ctk.CTk):
         return max(MIN_NODE_HEIGHT + SIBLING_PADDING, child_space)
     
     def _move_node_and_subtree(self, node: Node, dx: int, dy: int):
-        """Move a node and its entire subtree by the specified delta."""
-        # Move the node
+        """Move a node and all its children.
+        
+        Args:
+            node: Node to move
+            dx: Change in x coordinate
+            dy: Change in y coordinate
+        """
+        # Move the node's visual elements
         node.x += dx
         node.y += dy
         self.canvas.move(node.rect_id, dx, dy)
         self.canvas.move(node.text_id, dx, dy)
+        self.canvas.move(node.bg_id, dx, dy)
+        self.canvas.move(node.collapse_indicator, dx, dy)
         
         # Move all children recursively
         for child in node.children:
@@ -299,8 +308,23 @@ class MindMap(ctk.CTk):
         base_vertical_threshold = 50
         base_horizontal_threshold = 50
         
-        # Get all nodes except the current one
-        other_nodes = [n for n in self.nodes.values() if n != node]
+        # Get all visible nodes except the current one
+        other_nodes = []
+        for n in self.nodes.values():
+            if n == node:
+                continue
+                
+            # Check if node is visible (not under a collapsed parent)
+            current = n
+            is_visible = True
+            while current.parent:
+                if current.parent.is_collapsed:
+                    is_visible = False
+                    break
+                current = current.parent
+            
+            if is_visible:
+                other_nodes.append(n)
         
         # First pass: find nodes in the specified direction and calculate their distances
         direction_nodes = []
@@ -477,9 +501,11 @@ class MindMap(ctk.CTk):
         # Raise the dragged node above all other elements
         self.canvas.tag_raise(node.rect_id)
         self.canvas.tag_raise(node.text_id)
+        if self.dragged_node.children and self.dragged_node.is_collapsed:
+            self.canvas.tag_raise(self.dragged_node.collapse_indicator)
     
     def _drag(self, event):
-        """Handle node dragging."""
+        """Handle node drag event."""
         if not self.dragging or not self.dragged_node:
             return
             
@@ -500,6 +526,12 @@ class MindMap(ctk.CTk):
         
         # Update connector lines
         self._update_connector_lines()
+        
+        # Ensure dragged node and its elements stay on top
+        self.canvas.tag_raise(self.dragged_node.rect_id)
+        self.canvas.tag_raise(self.dragged_node.text_id)
+        if self.dragged_node.children and self.dragged_node.is_collapsed:
+            self.canvas.tag_raise(self.dragged_node.collapse_indicator)
     
     def _end_drag(self, event):
         """End dragging a node."""
@@ -570,13 +602,23 @@ class MindMap(ctk.CTk):
         # Draw new connector lines
         for node in self.nodes.values():
             if node.parent:
-                self.canvas.create_line(
-                    node.x, node.y,
-                    node.parent.x, node.parent.y,
-                    fill="#CCCCCC",
-                    width=2,
-                    tags="line"
-                )
+                # Check if either node is under a collapsed parent
+                current = node
+                should_draw = True
+                while current.parent:
+                    if current.parent.is_collapsed:
+                        should_draw = False
+                        break
+                    current = current.parent
+                
+                if should_draw:
+                    self.canvas.create_line(
+                        node.x, node.y,
+                        node.parent.x, node.parent.y,
+                        fill="#CCCCCC",
+                        width=2,
+                        tags="line"
+                    )
         
         # Make sure lines are below nodes
         self._reset_z_order()
@@ -607,19 +649,20 @@ class MindMap(ctk.CTk):
     def _reset_z_order(self):
         """Reset the z-order of all elements."""
         # Put lines at the bottom
-        for item in self.canvas.find_withtag("line"):
-            self.canvas.tag_lower(item)
+        for line in self.canvas.find_withtag("line"):
+            self.canvas.tag_lower(line)
         
-        # Put rectangles above lines
+        # Layer nodes above lines
         for node in self.nodes.values():
+            # Background
+            self.canvas.tag_raise(node.bg_id)
+            # Rectangle
             self.canvas.tag_raise(node.rect_id)
-            # Put text above rectangles
+            # Text
             self.canvas.tag_raise(node.text_id)
-        
-        # Put dragged node on top if exists
-        if self.dragged_node:
-            self.canvas.tag_raise(self.dragged_node.rect_id)
-            self.canvas.tag_raise(self.dragged_node.text_id)
+            # Collapse indicator
+            if node.children:
+                self.canvas.tag_raise(node.collapse_indicator)
     
     def _highlight_potential_parents(self):
         """Highlight nodes that can be potential parents."""
@@ -780,3 +823,36 @@ class MindMap(ctk.CTk):
         """End panning the canvas."""
         self.panning = False
         self.canvas.configure(cursor="")  # Reset cursor
+
+    def toggle_active_node(self, event=None):
+        """Toggle collapse state of active node."""
+        if not self.active_node:
+            return
+            
+        if self.active_node.toggle_collapse():
+            self._update_node_visibility()
+            self._update_connector_lines()
+    
+    def _update_node_visibility(self):
+        """Update visibility of nodes based on collapse state."""
+        for node in self.nodes.values():
+            # Check if node should be hidden (under a collapsed parent)
+            current = node
+            should_hide = False
+            while current.parent:
+                if current.parent.is_collapsed:
+                    should_hide = True
+                    break
+                current = current.parent
+            
+            # Update visibility
+            state = "hidden" if should_hide else "normal"
+            self.canvas.itemconfig(node.rect_id, state=state)
+            self.canvas.itemconfig(node.text_id, state=state)
+            self.canvas.itemconfig(node.bg_id, state=state)
+            
+            # Update collapse indicator
+            if not should_hide:
+                node._update_collapse_indicator()
+            else:
+                self.canvas.itemconfig(node.collapse_indicator, state="hidden")

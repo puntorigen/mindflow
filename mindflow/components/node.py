@@ -24,6 +24,7 @@ class Node:
         self.text = text
         self._parent = None  # Initialize _parent before setting it through property
         self.children: List['Node'] = []
+        self.is_collapsed = False
         
         # Create unique id for this node
         self.id = str(uuid.uuid4())
@@ -45,6 +46,16 @@ class Node:
             fill="#FFFFFF",
             font=("Arial", 12),
             tags=("text", self.id)
+        )
+        
+        # Create collapse indicator (hidden by default)
+        self.collapse_indicator = self.canvas.create_text(
+            x + 55, y,  # Position it further to the right
+            text="▶",
+            fill="#CCCCCC",  # Lighter color to match lines
+            font=("Arial", 12, "bold"),  # Larger and bolder
+            state="hidden",
+            tags=("collapse_indicator", self.id)
         )
         
         # Create invisible background for better click detection
@@ -74,6 +85,7 @@ class Node:
         # Set parent if provided
         if parent:
             self.parent = parent
+            self._update_collapse_indicator()  # Initialize indicator state
     
     def _on_click(self, event):
         """Handle click event."""
@@ -115,12 +127,14 @@ class Node:
         # Remove from old parent's children
         if self._parent and self in self._parent.children:
             self._parent.children.remove(self)
+            self._parent._update_collapse_indicator()  # Update old parent's indicator
         
         self._parent = value
         
         # Add to new parent's children
         if value and self not in value.children:
             value.children.append(self)
+            value._update_collapse_indicator()  # Update new parent's indicator
     
     def move(self, dx: int, dy: int):
         """Move the node and update connections.
@@ -136,6 +150,7 @@ class Node:
         self.canvas.move(self.rect_id, dx, dy)
         self.canvas.move(self.text_id, dx, dy)
         self.canvas.move(self.bg_id, dx, dy)
+        self.canvas.move(self.collapse_indicator, dx, dy)
         
         # Update connections
         if hasattr(self, 'connector'):
@@ -168,6 +183,30 @@ class Node:
                          bbox[0] - padding, bbox[1] - padding,
                          bbox[2] + padding, bbox[3] + padding)
     
+    def toggle_collapse(self) -> bool:
+        """Toggle collapse state of the node.
+        
+        Returns:
+            bool: True if state changed, False if node has no children
+        """
+        if not self.children:
+            return False
+            
+        self.is_collapsed = not self.is_collapsed
+        self._update_collapse_indicator()
+        return True
+    
+    def _update_collapse_indicator(self):
+        """Update the collapse indicator visibility and symbol."""
+        # Only show indicator if node has children AND is collapsed
+        if self.children and self.is_collapsed:
+            self.canvas.itemconfig(self.collapse_indicator, state="normal")
+            self.canvas.coords(self.collapse_indicator, self.x + 55, self.y)
+            self.canvas.tag_raise(self.collapse_indicator)  # Always on top
+        else:
+            # Hide indicator in all other cases
+            self.canvas.itemconfig(self.collapse_indicator, state="hidden")
+    
     def delete(self):
         """Remove the node and its visual elements."""
         # Delete children first
@@ -182,6 +221,7 @@ class Node:
         self.canvas.delete(self.rect_id)
         self.canvas.delete(self.text_id)
         self.canvas.delete(self.bg_id)
+        self.canvas.delete(self.collapse_indicator)
         
         # Remove from parent
         if self.parent:

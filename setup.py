@@ -12,7 +12,7 @@ setup(
     description="A modern mindmap creation tool using CustomTkinter",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/pabloschaffner/mindflow",
+    url="https://github.com/puntorigen/mindflow",
     classifiers=[
         "Programming Language :: Python :: 3.12",
         "License :: OSI Approved :: MIT License",
